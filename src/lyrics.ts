@@ -5,6 +5,8 @@ export interface LyricLine {
   text: string;
   /** début en secondes, null = pas encore synchronisée */
   start: number | null;
+  /** calage automatique peu fiable → à vérifier */
+  uncertain?: boolean;
 }
 
 export interface TimedLine {

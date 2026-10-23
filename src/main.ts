@@ -2,6 +2,8 @@ import '@fontsource-variable/inter';
 import '@fontsource-variable/outfit';
 import './style.css';
 
+import { ALL_FORMATS, BlobSource, Input, type MetadataTags } from 'mediabunny';
+import { alignLines, guessLanguage, wordsToLines, type AsrWord } from './align';
 import { analyzeAudio, type Analysis } from './analysis';
 import { FORMATS, X_FREE_MAX, exportVideo, type ExportJob } from './exporter';
 import { formatTime, isLrc, makeLine, parseLyrics, parseTime, toLrc, toTimed, type LyricLine, type TimedLine } from './lyrics';
@@ -31,6 +33,8 @@ const S = {
   analysis: null as Analysis | null,
   audioKey: '',
   image: null as ImageBitmap | null,
+  /** true si le fond vient de la pochette intégrée au MP3 (remplaçable) */
+  imageFromCover: false,
   blurred: null as HTMLCanvasElement | null,
   blur: 0,
   dim: 0.15,
@@ -252,10 +256,19 @@ async function loadAudio(file: File) {
     audioEl.src = URL.createObjectURL(file);
     audioEl.currentTime = 0;
 
-    // titre déduit du nom de fichier Suno
-    const guess = file.name.replace(/\.[^.]+$/, '').replace(/[_]+/g, ' ').replace(/\s*\(\d+\)$/, '').trim();
-    S.title = guess;
-    titleInput.value = guess;
+    // métadonnées Suno (ID3) : titre, artiste, paroles, pochette
+    const tags = await readTags(file);
+    const guess = file.name.replace(/\.[^.]+$/, '').replace(/^[0-9a-f]{6,}[-_]/i, '').replace(/[_]+/g, ' ').replace(/\s*\(\d+\)$/, '').trim();
+    S.title = tags.title?.trim() || guess;
+    titleInput.value = S.title;
+    if (tags.artist?.trim()) {
+      S.artist = tags.artist.trim();
+      artistInput.value = S.artist;
+    }
+    const cover = tags.images?.find((i) => i.kind === 'coverFront') ?? tags.images?.[0];
+    if (cover && (!S.image || S.imageFromCover)) {
+      await loadImage(new Blob([cover.data as BlobPart], { type: cover.mimeType }), 'Pochette Suno (intégrée au MP3)', true);
+    }
 
     audioMeta.textContent = `${fmt(decoded.duration)} · ${decoded.numberOfChannels > 1 ? 'stéréo' : 'mono'}`;
     zone.classList.add('is-loaded');
@@ -267,7 +280,16 @@ async function loadAudio(file: File) {
     // paroles mémorisées pour ce fichier ?
     if (loadLyrics()) {
       $<HTMLInputElement>('instrumental-input').checked = S.instrumental;
+      $('lyrics-wrapper').classList.toggle('is-disabled', S.instrumental);
       lyricsInput.value = S.lines.map((l) => l.text).join('\n');
+    } else {
+      // paroles intégrées par Suno, sinon on repart à vide
+      const { text: lyr, lang } = extractLyrics(tags);
+      if (lang && !langSelect.value) langSelect.value = lang;
+      S.lines = [];
+      lyricsInput.value = lyr;
+      if (lyr) S.lines = parseLyrics(lyr);
+      lyricsSource.hidden = !lyr;
     }
     resetClip();
     lyricsChanged(false);
@@ -276,6 +298,33 @@ async function loadAudio(file: File) {
     console.error(e);
     audioMeta.textContent = 'Impossible de lire ce fichier audio.';
     audioMeta.classList.add('error_text');
+  }
+}
+
+const ISO_LANG: Record<string, string> = { eng: 'english', fra: 'french', fre: 'french', spa: 'spanish', por: 'portuguese', ita: 'italian', deu: 'german', ger: 'german' };
+
+/** Paroles intégrées : champ standard, ou TXXX « lyrics-xxx » utilisé par Suno */
+function extractLyrics(tags: MetadataTags): { text: string; lang: string | null } {
+  if (tags.lyrics?.trim()) return { text: tags.lyrics.trim(), lang: null };
+  const txxx = tags.raw?.TXXX;
+  if (txxx && typeof txxx === 'object' && !(txxx instanceof Uint8Array)) {
+    for (const [k, v] of Object.entries(txxx as Record<string, string>)) {
+      const m = /^lyrics(?:[-_ ]([a-z]{3}))?$/i.exec(k.trim());
+      if (m && typeof v === 'string' && v.trim()) return { text: v.trim(), lang: ISO_LANG[m[1]?.toLowerCase() ?? ''] ?? null };
+    }
+  }
+  return { text: '', lang: null };
+}
+
+async function readTags(file: File): Promise<MetadataTags> {
+  try {
+    const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
+    const tags = await input.getMetadataTags();
+    input.dispose();
+    return tags;
+  } catch (e) {
+    console.warn('Métadonnées illisibles', e);
+    return {};
   }
 }
 
@@ -290,7 +339,7 @@ artistInput.addEventListener('input', () => {
 });
 
 // ------------------------------------------------------------------ Image
-async function loadImage(file: File) {
+async function loadImage(file: Blob, name = (file as File).name ?? 'image', fromCover = false) {
   const zone = document.querySelector<HTMLElement>('[data-drop="image"]')!;
   try {
     let bmp = await createImageBitmap(file);
@@ -304,9 +353,12 @@ async function loadImage(file: File) {
     S.image?.close();
     S.image = bmp;
     rebuildBlur();
-    $('image-label').textContent = file.name;
+    S.imageFromCover = fromCover;
+    $('image-label').textContent = name;
     const thumb = $('image-thumb');
-    thumb.style.backgroundImage = `url(${URL.createObjectURL(file)})`;
+    if (thumb.dataset.url) URL.revokeObjectURL(thumb.dataset.url);
+    thumb.dataset.url = URL.createObjectURL(file);
+    thumb.style.backgroundImage = `url(${thumb.dataset.url})`;
     zone.classList.add('is-loaded');
     renderPalettes();
     // couleurs auto si l'utilisateur n'a pas choisi de palette manuelle
@@ -511,6 +563,7 @@ $('clip-here-btn').addEventListener('click', () => {
 
 // ------------------------------------------------------------------ Paroles
 const lyricsInput = $<HTMLTextAreaElement>('lyrics-input');
+const lyricsSource = $('lyrics-source');
 const linesList = $<HTMLOListElement>('lines-list');
 const syncComp = $('sync-component');
 let lyricsTimer = 0;
@@ -542,6 +595,7 @@ function onLyricsText() {
   lyricsChanged();
 }
 lyricsInput.addEventListener('input', () => {
+  lyricsSource.hidden = true;
   clearTimeout(lyricsTimer);
   lyricsTimer = window.setTimeout(onLyricsText, 250);
 });
@@ -559,13 +613,18 @@ function renderLines() {
   const synced = S.lines.filter((l) => l.start !== null).length;
   $('sync-status').textContent = `${synced} / ${S.lines.length} lignes synchronisées`;
   $<HTMLButtonElement>('lrc-export-btn').disabled = synced === 0;
-  $('tap-start-btn').textContent = synced ? 'Reprendre la synchro au tap' : 'Synchroniser au tap';
+  $('tap-start-btn').textContent = synced ? 'Ajuster au tap' : 'Synchroniser au tap';
+  updateAutoBtn();
 
   linesList.innerHTML = '';
   S.lines.forEach((l, i) => {
     const li = document.createElement('li');
     li.className = 'lines_item';
     li.dataset.idx = String(i);
+    if (l.uncertain) {
+      li.classList.add('is-uncertain');
+      li.title = 'Calage automatique incertain : vérifie ce temps';
+    }
     if (i === S.tapIndex) li.classList.add('is-next');
     const inp = document.createElement('input');
     inp.className = 'lines_time' + (l.start === null ? ' is-empty' : '');
@@ -574,6 +633,7 @@ function renderLines() {
     inp.setAttribute('aria-label', `Début de la ligne ${i + 1}`);
     inp.addEventListener('change', () => {
       l.start = parseTime(inp.value);
+      l.uncertain = false;
       lyricsChanged();
     });
     const txt = document.createElement('span');
@@ -617,6 +677,102 @@ document.querySelectorAll<HTMLButtonElement>('[data-offset]').forEach((b) =>
     lyricsChanged();
   }),
 );
+
+// --- Calage automatique (Whisper)
+const autoBtn = $<HTMLButtonElement>('auto-sync-btn');
+const langSelect = $<HTMLSelectElement>('lang-select');
+let worker: Worker | null = null;
+
+function updateAutoBtn() {
+  autoBtn.disabled = !S.audioBuffer || !!worker;
+  autoBtn.textContent = S.lines.length ? '✦ Caler automatiquement' : '✦ Transcrire et caler';
+}
+
+/** Mono 16 kHz pour Whisper */
+async function to16k(buf: AudioBuffer): Promise<Float32Array> {
+  const ctx = new OfflineAudioContext(1, Math.ceil(buf.duration * 16000), 16000);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  src.connect(ctx.destination);
+  src.start();
+  const out = await ctx.startRendering();
+  return out.getChannelData(0);
+}
+
+function stopWorker() {
+  worker?.terminate();
+  worker = null;
+  $('auto-progress').hidden = true;
+  $('auto-hint').hidden = false;
+  updateAutoBtn();
+}
+
+autoBtn.addEventListener('click', async () => {
+  if (!S.audioBuffer || worker) return;
+  const synced = S.lines.some((l) => l.start !== null);
+  if (synced && !confirm('Remplacer les temps déjà calés par le calage automatique ?')) return;
+  stopTap();
+  const fill = $('auto-fill');
+  const status = $('auto-status');
+  status.classList.remove('error_text');
+  $('auto-progress').hidden = false;
+  $('auto-hint').hidden = true;
+  fill.style.width = '0%';
+  status.textContent = 'Préparation de l’audio…';
+
+  const lang = langSelect.value || guessLanguage(S.lines.map((l) => l.text).join(' ')) || null;
+  const audio = await to16k(S.audioBuffer);
+  worker = new Worker(new URL('./whisper.worker.ts', import.meta.url), { type: 'module' });
+  updateAutoBtn();
+  const t0 = performance.now();
+
+  worker.onmessage = (e: MessageEvent) => {
+    const m = e.data;
+    if (m.type === 'download') {
+      const p = m.total ? m.loaded / m.total : 0;
+      fill.style.width = `${Math.round(p * 30)}%`;
+      status.textContent = `Téléchargement du modèle… ${(m.loaded / 1048576).toFixed(0)} / ${(m.total / 1048576).toFixed(0)} Mo`;
+    } else if (m.type === 'transcribe') {
+      fill.style.width = `${Math.round(30 + m.progress * 70)}%`;
+      status.textContent = `Écoute du chant… ${Math.round(m.progress * 100)} %`;
+    } else if (m.type === 'done') {
+      applyAsr(m.words as AsrWord[]);
+      stopWorker();
+      console.info(`Calage auto : ${(m.words as AsrWord[]).length} mots en ${((performance.now() - t0) / 1000).toFixed(1)} s`);
+    } else if (m.type === 'error') {
+      stopWorker();
+      $('auto-progress').hidden = false;
+      status.textContent = /fetch|network|load/i.test(m.message)
+        ? 'Impossible de télécharger le modèle Whisper (huggingface.co inaccessible). Vérifie ta connexion ou cale au tap.'
+        : `Échec du calage auto : ${m.message}`;
+      status.classList.add('error_text');
+      $('auto-cancel').hidden = true;
+    }
+  };
+  $('auto-cancel').hidden = false;
+  worker.postMessage({ type: 'run', audio, language: lang }, [audio.buffer]);
+});
+$('auto-cancel').addEventListener('click', stopWorker);
+
+function applyAsr(words: AsrWord[]) {
+  const d = duration();
+  if (!words.length) {
+    alert('Aucune voix détectée. Si le morceau est instrumental, coche « Morceau instrumental ».');
+    return;
+  }
+  if (S.lines.length) {
+    const res = alignLines(S.lines.map((l) => l.text), words, d);
+    S.lines.forEach((l, i) => {
+      l.start = res[i].start;
+      l.uncertain = res[i].confidence < 0.34;
+    });
+  } else {
+    // pas de paroles fournies : on prend la transcription brute
+    S.lines = wordsToLines(words).map((w) => ({ ...makeLine(w.text, +w.start.toFixed(2)), uncertain: false }));
+    lyricsInput.value = S.lines.map((l) => l.text).join('\n');
+  }
+  lyricsChanged();
+}
 
 // --- Import / export LRC
 const lrcInput = $<HTMLInputElement>('lrc-input');

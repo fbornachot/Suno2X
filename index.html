@@ -84,6 +84,32 @@
                     <span class="field_label">Colle les paroles Suno (ou un fichier .lrc)</span>
                     <textarea class="field_input is-textarea" id="lyrics-input" rows="6" placeholder="[Verse 1]&#10;Première ligne…&#10;Deuxième ligne…&#10;&#10;Les balises [Verse], [Chorus]… sont ignorées."></textarea>
                   </label>
+                  <p class="text-size-tiny text-color-muted lyrics_source" id="lyrics-source" hidden>✓ Paroles récupérées automatiquement depuis le MP3 Suno</p>
+                  <div class="auto_component" id="auto-component">
+                    <div class="field_row">
+                      <label class="field_component auto_lang">
+                        <span class="field_label">Langue du chant</span>
+                        <select class="field_input" id="lang-select">
+                          <option value="">Auto</option>
+                          <option value="english">Anglais</option>
+                          <option value="french">Français</option>
+                          <option value="spanish">Espagnol</option>
+                          <option value="portuguese">Portugais</option>
+                          <option value="italian">Italien</option>
+                          <option value="german">Allemand</option>
+                        </select>
+                      </label>
+                      <button type="button" class="button is-primary field_button" id="auto-sync-btn" disabled>✦ Caler automatiquement</button>
+                    </div>
+                    <div class="export_progress" id="auto-progress" hidden>
+                      <div class="export_bar"><div class="export_fill" id="auto-fill"></div></div>
+                      <div class="export_meta">
+                        <span class="text-size-small" id="auto-status">Préparation…</span>
+                        <button type="button" class="button is-link" id="auto-cancel">Annuler</button>
+                      </div>
+                    </div>
+                    <p class="text-size-tiny text-color-muted auto_hint" id="auto-hint">IA Whisper exécutée dans ton navigateur (~80 Mo téléchargés une seule fois). Vérifie ensuite les lignes marquées <span class="auto_flag">⚠</span>.</p>
+                  </div>
                   <div class="button_row">
                     <button type="button" class="button is-secondary is-small" id="lrc-import-btn">Importer .lrc</button>
                     <button type="button" class="button is-secondary is-small" id="lrc-export-btn" disabled>Exporter .lrc</button>
