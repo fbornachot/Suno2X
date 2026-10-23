@@ -7,7 +7,7 @@ import { alignLines, guessLanguage, wordsToLines, type AsrWord } from './align';
 import { MODEL_BASE, MODEL_TINY_EN } from './models';
 import { analyzeAudio, type Analysis } from './analysis';
 import { loadFile, saveFile } from './persist';
-import { FORMATS, X_FREE_MAX, exportVideo, type ExportJob } from './exporter';
+import { FORMATS, X_FREE_MAX, estimateMb, exportVideo, type ExportJob, type Weight } from './exporter';
 import { formatTime, isLrc, makeLine, parseLyrics, parseTime, toLrc, toTimed, type LyricLine, type TimedLine } from './lyrics';
 import { FONT_DISPLAY, FONT_UI, drawFrame, extractAccent, makeBlurred, type RenderState, type VizStyle } from './renderer';
 
@@ -58,6 +58,7 @@ const S = {
   clipStart: 0,
   clipEnd: 0,
   premium: false,
+  weight: 'balanced' as Weight,
   tapIndex: -1,
   exporting: false,
 };
@@ -67,7 +68,7 @@ const invalidate = () => (dirty = true);
 
 // ------------------------------------------------------------------ Préférences (localStorage, best effort)
 const PREF_KEY = 'suno2x:prefs';
-const PREF_FIELDS = ['blur', 'dim', 'kenBurns', 'pulse', 'viz', 'palette', 'colorA', 'colorB', 'artist', 'showTitle', 'showProgress', 'karaoke', 'formatId', 'premium'] as const;
+const PREF_FIELDS = ['blur', 'dim', 'kenBurns', 'pulse', 'viz', 'palette', 'colorA', 'colorB', 'artist', 'showTitle', 'showProgress', 'karaoke', 'formatId', 'premium', 'weight'] as const;
 
 function savePrefs() {
   try {
@@ -420,6 +421,7 @@ document.querySelectorAll<HTMLButtonElement>('#viz-group .segmented_item').forEa
   b.addEventListener('click', () => {
     S.viz = b.dataset.value as VizStyle;
     renderViz();
+    updateWeightUi();
     savePrefs();
     invalidate();
   }),
@@ -502,6 +504,7 @@ function renderFormats() {
       S.formatId = f.id;
       renderFormats();
       sizeCanvas();
+      updateWeightUi();
       savePrefs();
     });
     box.append(b);
@@ -536,7 +539,22 @@ function syncClipUi() {
     notice.textContent = `Extrait de ${fmt(len)} sur ${fmt(d)}.`;
   } else notice.hidden = true;
   updateClipBand();
+  updateWeightUi();
   invalidate();
+}
+
+function updateWeightUi() {
+  document.querySelectorAll<HTMLButtonElement>('#weight-group .segmented_item').forEach((b) => {
+    b.setAttribute('aria-checked', String(b.dataset.value === S.weight));
+  });
+  const f = format();
+  const len = Math.max(0, (S.clipEnd || duration()) - S.clipStart) || X_FREE_MAX;
+  const mb = estimateMb(f.width, f.height, S.weight, len);
+  const label = { light: 'Léger : plus compact, détails un peu plus doux', balanced: 'Équilibré : recommandé pour X', max: 'Max : qualité maximale, fichier lourd' }[S.weight];
+  let txt = `${label}. Jusqu’à ~${Math.round(mb)} Mo pour ${fmt(len)}.`;
+  // avec Vinyle le disque tourne en continu : figer le fond ne réduit pas le poids (mesuré)
+  if (S.viz !== 'radial' && (S.kenBurns || S.pulse)) txt += ' Astuce : sans « Zoom lent » ni « Pulse » (étape 2), le fond reste fixe et le fichier s’allège d’environ 40 %.';
+  $('weight-hint').textContent = txt;
 }
 
 function restoreClip() {
@@ -735,7 +753,8 @@ function stopWorker() {
 autoBtn.addEventListener('click', async () => {
   if (!S.audioBuffer || worker) return;
   const synced = S.lines.some((l) => l.start !== null);
-  if (synced && !confirm('Remplacer les temps déjà calés par le calage automatique ?')) return;
+  const partialRun = S.clipStart > 0.5 || (S.clipEnd || duration()) < duration() - 0.5;
+  if (synced && !partialRun && !confirm('Remplacer les temps déjà calés par le calage automatique ?')) return;
   stopTap();
   const fill = $('auto-fill');
   const status = $('auto-status');
@@ -797,6 +816,8 @@ function applyAsr(words: AsrWord[], partial: boolean) {
   if (S.lines.length) {
     const res = alignLines(S.lines.map((l) => l.text), words, d, partial);
     S.lines.forEach((l, i) => {
+      // ligne hors de l'extrait écouté : on conserve le calage d'une passe précédente
+      if (partial && res[i].start === null) return;
       l.start = res[i].start;
       l.uncertain = res[i].start !== null && res[i].confidence < 0.34;
     });
@@ -939,7 +960,7 @@ exportBtn.addEventListener('click', async () => {
     if (p.phase === 'prepare') status.textContent = 'Préparation de l’encodeur…';
     else if (p.phase === 'finalize') status.textContent = 'Finalisation du MP4…';
     else status.textContent = `Encodage ${Math.round(p.progress * 100)} %${p.eta !== undefined ? ` · reste ~${Math.ceil(p.eta)} s` : ''}`;
-  });
+  }, S.weight);
 
   try {
     const blob = await job.promise;
@@ -1030,11 +1051,20 @@ function init() {
   bindToggle('karaoke-toggle', 'karaoke');
   bindToggle('premium-input', 'premium', () => applyClip(S.clipStart, S.premium ? duration() : S.clipStart + X_FREE_MAX));
 
+  document.querySelectorAll<HTMLButtonElement>('#weight-group .segmented_item').forEach((b) =>
+    b.addEventListener('click', () => {
+      S.weight = b.dataset.value as Weight;
+      savePrefs();
+      updateWeightUi();
+    }),
+  );
+  for (const id of ['kenburns-input', 'pulse-input']) $(id).addEventListener('change', updateWeightUi);
   setupDrop('audio', $<HTMLInputElement>('audio-input'), loadAudio);
   setupDrop('image', $<HTMLInputElement>('image-input'), loadImage);
   renderViz();
   renderPalettes();
   renderFormats();
+  updateWeightUi();
   sizeCanvas();
   new ResizeObserver(sizeCanvas).observe(stage);
   void ensureFonts().then(invalidate);
