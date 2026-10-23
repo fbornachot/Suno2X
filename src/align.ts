@@ -8,7 +8,8 @@ export interface AsrWord {
 }
 
 export interface AlignedLine {
-  start: number;
+  /** null = ligne hors de l'extrait écouté */
+  start: number | null;
   /** part des mots de la ligne retrouvés dans la transcription (0..1) */
   confidence: number;
 }
@@ -109,7 +110,11 @@ export function alignWords(lyrics: string[], asr: string[]): Int32Array {
 const WORD_DUR = 0.32; // durée moyenne d'un mot chanté (s), pour extrapoler
 
 /** Calcule le début de chaque ligne de paroles à partir des mots Whisper */
-export function alignLines(lines: string[], words: AsrWord[], duration: number): AlignedLine[] {
+/**
+ * @param partial true si seul un extrait du morceau a été transcrit : les lignes non retrouvées
+ *   avant la première / après la dernière ligne reconnue sont laissées sans temps (null).
+ */
+export function alignLines(lines: string[], words: AsrWord[], duration: number, partial = false): AlignedLine[] {
   const lineWords = lines.map(tokenize);
   const flat: { line: number; idx: number; w: string }[] = [];
   lineWords.forEach((ws, line) => ws.forEach((w, idx) => flat.push({ line, idx, w })));
@@ -150,9 +155,16 @@ export function alignLines(lines: string[], words: AsrWord[], duration: number):
   }
 
   // interpolation des lignes non retrouvées, au prorata du nombre de mots
+  const firstHit = raw.findIndex((t) => t !== null);
+  let lastHit = -1;
+  raw.forEach((t, i) => t !== null && (lastHit = i));
   const out: AlignedLine[] = [];
   for (let i = 0; i < raw.length; i++) {
     let t = raw[i];
+    if (partial && (firstHit < 0 || i < firstHit || i > lastHit)) {
+      out.push({ start: null, confidence: 0 });
+      continue;
+    }
     if (t === null) {
       let a = i - 1;
       while (a >= 0 && raw[a] === null) a--;

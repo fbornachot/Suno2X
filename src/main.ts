@@ -4,7 +4,9 @@ import './style.css';
 
 import { ALL_FORMATS, BlobSource, Input, type MetadataTags } from 'mediabunny';
 import { alignLines, guessLanguage, wordsToLines, type AsrWord } from './align';
+import { MODEL_BASE, MODEL_TINY_EN } from './models';
 import { analyzeAudio, type Analysis } from './analysis';
+import { loadFile, saveFile } from './persist';
 import { FORMATS, X_FREE_MAX, exportVideo, type ExportJob } from './exporter';
 import { formatTime, isLrc, makeLine, parseLyrics, parseTime, toLrc, toTimed, type LyricLine, type TimedLine } from './lyrics';
 import { FONT_DISPLAY, FONT_UI, drawFrame, extractAccent, makeBlurred, type RenderState, type VizStyle } from './renderer';
@@ -292,7 +294,9 @@ async function loadAudio(file: File) {
       lyricsSource.hidden = !lyr;
     }
     resetClip();
+    restoreClip();
     lyricsChanged(false);
+    void saveFile('audio', { blob: file, name: file.name });
     invalidate();
   } catch (e) {
     console.error(e);
@@ -354,6 +358,7 @@ async function loadImage(file: Blob, name = (file as File).name ?? 'image', from
     S.image = bmp;
     rebuildBlur();
     S.imageFromCover = fromCover;
+    void saveFile('image', fromCover ? null : { blob: file, name });
     $('image-label').textContent = name;
     const thumb = $('image-thumb');
     if (thumb.dataset.url) URL.revokeObjectURL(thumb.dataset.url);
@@ -534,6 +539,16 @@ function syncClipUi() {
   invalidate();
 }
 
+function restoreClip() {
+  try {
+    const raw = localStorage.getItem(`suno2x:clip:${S.audioKey}`);
+    if (raw) {
+      const [s, e] = JSON.parse(raw) as [number, number];
+      applyClip(s, e);
+    }
+  } catch { /* ignore */ }
+}
+
 function applyClip(start: number, end: number) {
   const d = duration();
   if (!d) return;
@@ -542,6 +557,9 @@ function applyClip(start: number, end: number) {
   if (e - s > maxLen()) e = s + maxLen();
   S.clipStart = s;
   S.clipEnd = e;
+  try {
+    localStorage.setItem(`suno2x:clip:${S.audioKey}`, JSON.stringify([s, e]));
+  } catch { /* ignore */ }
   syncClipUi();
 }
 
@@ -689,17 +707,24 @@ function updateAutoBtn() {
 }
 
 /** Mono 16 kHz pour Whisper */
-async function to16k(buf: AudioBuffer): Promise<Float32Array> {
-  const ctx = new OfflineAudioContext(1, Math.ceil(buf.duration * 16000), 16000);
+async function to16k(buf: AudioBuffer, start: number, end: number): Promise<Float32Array> {
+  const len = Math.max(0.5, end - start);
+  const ctx = new OfflineAudioContext(1, Math.ceil(len * 16000), 16000);
   const src = ctx.createBufferSource();
   src.buffer = buf;
   src.connect(ctx.destination);
-  src.start();
+  src.start(0, start, len);
   const out = await ctx.startRendering();
   return out.getChannelData(0);
 }
 
+const ASR_FLAG = 'suno2x:asr-running';
+const IS_MOBILE = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
 function stopWorker() {
+  try {
+    sessionStorage.removeItem(ASR_FLAG);
+  } catch { /* ignore */ }
   worker?.terminate();
   worker = null;
   $('auto-progress').hidden = true;
@@ -721,7 +746,15 @@ autoBtn.addEventListener('click', async () => {
   status.textContent = 'Préparation de l’audio…';
 
   const lang = langSelect.value || guessLanguage(S.lines.map((l) => l.text).join(' ')) || null;
-  const audio = await to16k(S.audioBuffer);
+  // seul l'extrait retenu est écouté : plus rapide et beaucoup moins de mémoire
+  const from = S.clipStart;
+  const to = S.clipEnd || duration();
+  const partial = from > 0.5 || to < duration() - 0.5;
+  const audio = await to16k(S.audioBuffer, from, to);
+  const model = IS_MOBILE && lang === 'english' ? MODEL_TINY_EN : MODEL_BASE;
+  try {
+    sessionStorage.setItem(ASR_FLAG, '1');
+  } catch { /* ignore */ }
   worker = new Worker(new URL('./whisper.worker.ts', import.meta.url), { type: 'module' });
   updateAutoBtn();
   const t0 = performance.now();
@@ -736,7 +769,8 @@ autoBtn.addEventListener('click', async () => {
       fill.style.width = `${Math.round(30 + m.progress * 70)}%`;
       status.textContent = `Écoute du chant… ${Math.round(m.progress * 100)} %`;
     } else if (m.type === 'done') {
-      applyAsr(m.words as AsrWord[]);
+      const words = (m.words as AsrWord[]).map((w) => ({ ...w, start: w.start + from, end: w.end + from }));
+      applyAsr(words, partial);
       stopWorker();
       console.info(`Calage auto : ${(m.words as AsrWord[]).length} mots en ${((performance.now() - t0) / 1000).toFixed(1)} s`);
     } else if (m.type === 'error') {
@@ -750,21 +784,21 @@ autoBtn.addEventListener('click', async () => {
     }
   };
   $('auto-cancel').hidden = false;
-  worker.postMessage({ type: 'run', audio, language: lang }, [audio.buffer]);
+  worker.postMessage({ type: 'run', audio, language: lang, model }, [audio.buffer]);
 });
 $('auto-cancel').addEventListener('click', stopWorker);
 
-function applyAsr(words: AsrWord[]) {
+function applyAsr(words: AsrWord[], partial: boolean) {
   const d = duration();
   if (!words.length) {
     alert('Aucune voix détectée. Si le morceau est instrumental, coche « Morceau instrumental ».');
     return;
   }
   if (S.lines.length) {
-    const res = alignLines(S.lines.map((l) => l.text), words, d);
+    const res = alignLines(S.lines.map((l) => l.text), words, d, partial);
     S.lines.forEach((l, i) => {
       l.start = res[i].start;
-      l.uncertain = res[i].confidence < 0.34;
+      l.uncertain = res[i].start !== null && res[i].confidence < 0.34;
     });
   } else {
     // pas de paroles fournies : on prend la transcription brute
@@ -954,6 +988,31 @@ async function ensureFonts() {
   ]).catch(() => {});
 }
 
+async function restoreSession() {
+  let crashed = false;
+  try {
+    crashed = sessionStorage.getItem(ASR_FLAG) === '1';
+    sessionStorage.removeItem(ASR_FLAG);
+  } catch { /* ignore */ }
+  const audio = await loadFile('audio');
+  if (audio) {
+    audioMeta.textContent = 'Restauration du dernier morceau…';
+    await loadAudio(new File([audio.blob], audio.name, { type: audio.blob.type }));
+    const img = await loadFile('image');
+    if (img) await loadImage(img.blob, img.name);
+  }
+  if (crashed) {
+    const status = $('auto-status');
+    $('auto-progress').hidden = false;
+    $('auto-cancel').hidden = true;
+    $('auto-fill').style.width = '0%';
+    status.classList.add('error_text');
+    status.textContent = IS_MOBILE
+      ? 'La page a redémarré pendant le calage auto : mémoire insuffisante sur ce téléphone. Réduis l’extrait (Début/Fin, ~30 s), réessaie, ou utilise un ordinateur / le calage au tap.'
+      : 'La page a redémarré pendant le calage auto (mémoire insuffisante). Réduis l’extrait ou cale au tap.';
+  }
+}
+
 function init() {
   loadPrefs();
   applyAccentCss();
@@ -979,6 +1038,7 @@ function init() {
   sizeCanvas();
   new ResizeObserver(sizeCanvas).observe(stage);
   void ensureFonts().then(invalidate);
+  void restoreSession();
   requestAnimationFrame(loop);
 }
 
