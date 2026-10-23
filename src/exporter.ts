@@ -30,6 +30,23 @@ export const FORMATS: ExportFormat[] = [
 
 export const X_FREE_MAX = 140; // secondes
 
+export type Weight = 'light' | 'balanced' | 'max';
+
+// Débit vidéo cible en bits par pixel et par image (référence 1080×1350 à 30 i/s) :
+// léger ≈ 2,5 Mbit/s, équilibré ≈ 5 Mbit/s, max ≈ 8 Mbit/s. Débit variable : un contenu
+// peu animé descend souvent bien en dessous de la cible.
+const BPP: Record<Weight, number> = { light: 0.057, balanced: 0.114, max: 0.18 };
+export const AUDIO_BITRATE = 192_000;
+
+export function videoBitrate(width: number, height: number, weight: Weight): number {
+  return Math.round((width * height * FPS * BPP[weight]) / 100_000) * 100_000;
+}
+
+/** Taille maximale estimée (Mo) : le fichier réel est souvent plus léger */
+export function estimateMb(width: number, height: number, weight: Weight, seconds: number): number {
+  return ((videoBitrate(width, height, weight) + AUDIO_BITRATE) * seconds) / 8 / 1_000_000;
+}
+
 export interface ExportProgress {
   phase: 'prepare' | 'encode' | 'finalize';
   progress: number; // 0..1
@@ -76,6 +93,7 @@ export function exportVideo(
   base: RenderState,
   audio: AudioBuffer,
   onProgress: (p: ExportProgress) => void,
+  weight: Weight = 'balanced',
 ): ExportJob {
   let cancelled = false;
   let output: Output | null = null;
@@ -83,7 +101,7 @@ export function exportVideo(
   const promise = (async () => {
     onProgress({ phase: 'prepare', progress: 0 });
     const { width, height } = base;
-    const bitrate = width * height >= 1920 * 1080 ? 10_000_000 : 8_000_000;
+    const bitrate = videoBitrate(width, height, weight);
 
     if (!(await canEncodeVideo('avc', { width, height, bitrate }))) {
       throw new Error("Ton navigateur ne sait pas encoder en H.264. Utilise Chrome, Edge ou Safari récent sur ordinateur.");
@@ -104,7 +122,7 @@ export function exportVideo(
       keyFrameInterval: 2,
       latencyMode: 'quality',
     });
-    const sound = new AudioBufferSource({ codec: 'aac', bitrate: 192_000 });
+    const sound = new AudioBufferSource({ codec: 'aac', bitrate: AUDIO_BITRATE });
     output.addVideoTrack(video, { frameRate: FPS });
     output.addAudioTrack(sound);
     await output.start();

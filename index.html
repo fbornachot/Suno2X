@@ -180,6 +180,13 @@
                   <label class="toggle_component"><input type="checkbox" id="premium-input" /><span class="toggle_switch"></span>Compte X Premium (vidéo &gt; 2:20)</label>
                 </div>
                 <p class="notice_component text-size-small" id="clip-notice" hidden></p>
+                <span class="field_label">Poids du fichier</span>
+                <div class="segmented_component" role="radiogroup" aria-label="Poids du fichier" id="weight-group">
+                  <button type="button" role="radio" class="segmented_item" data-value="light" aria-checked="false">Léger</button>
+                  <button type="button" role="radio" class="segmented_item" data-value="balanced" aria-checked="true">Équilibré</button>
+                  <button type="button" role="radio" class="segmented_item" data-value="max" aria-checked="false">Max</button>
+                </div>
+                <p class="text-size-tiny text-color-muted weight_hint" id="weight-hint"></p>
               </section>
             </div>
 

@@ -214,6 +214,7 @@ kbd {
 .format_shape { border: 2px solid currentColor; border-radius: 3px; opacity: 0.8; }
 .format_label { font-weight: 700; font-size: 0.875rem; }
 .format_hint { font-size: 0.6875rem; color: var(--color-muted); line-height: 1.2; }
+.weight_hint { margin: 0; }
 .notice_component { margin: 0; padding: 0.625rem 0.75rem; border-radius: var(--radius-small); background: color-mix(in srgb, #ffb020 12%, transparent); border: 1px solid color-mix(in srgb, #ffb020 35%, transparent); color: #ffd37a; }
 
 /* ---------- Paroles / synchro ---------- */
