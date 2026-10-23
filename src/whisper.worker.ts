@@ -2,7 +2,6 @@
 import { env, pipeline, type AutomaticSpeechRecognitionPipeline } from '@huggingface/transformers';
 import type { AsrWord } from './align';
 
-export const MODEL_ID = 'onnx-community/whisper-base_timestamped';
 const SR = 16000;
 // Fenêtres de 29 s (pas 30 : bug connu des timestamps mot à mot à 30 s), recouvrement 4 s
 const WIN = 29;
@@ -11,14 +10,17 @@ const EDGE = 2;
 
 env.allowLocalModels = false;
 
-type InMsg = { type: 'run'; audio: Float32Array; language: string | null };
+type InMsg = { type: 'run'; audio: Float32Array; language: string | null; model: string };
 
 let asr: AutomaticSpeechRecognitionPipeline | null = null;
+let loadedModel = '';
 
 const post = (m: unknown) => (self as unknown as Worker).postMessage(m);
 
-async function load() {
-  if (asr) return asr;
+async function load(MODEL_ID: string) {
+  if (asr && loadedModel === MODEL_ID) return asr;
+  asr = null;
+  loadedModel = MODEL_ID;
   const files = new Map<string, { loaded: number; total: number }>();
   const progress_callback = (p: { status: string; file?: string; loaded?: number; total?: number }) => {
     if (p.status === 'progress' && p.file) {
@@ -32,11 +34,21 @@ async function load() {
       post({ type: 'download', loaded: l, total: t });
     }
   };
-  try {
-    asr = (await pipeline('automatic-speech-recognition', MODEL_ID, { dtype: 'q8', device: 'wasm', progress_callback })) as AutomaticSpeechRecognitionPipeline;
-  } catch {
-    // repli si la variante quantifiée n'est pas disponible
-    asr = (await pipeline('automatic-speech-recognition', MODEL_ID, { dtype: 'fp32', device: 'wasm', progress_callback })) as AutomaticSpeechRecognitionPipeline;
+  // du plus léger au plus lourd : q8, puis q4, puis fp32 si aucune variante quantifiée n'existe
+  let lastErr: unknown;
+  for (const dtype of ['q8', 'q4', 'fp32'] as const) {
+    try {
+      asr = (await pipeline('automatic-speech-recognition', MODEL_ID, { dtype, device: 'wasm', progress_callback })) as AutomaticSpeechRecognitionPipeline;
+      break;
+    } catch (err) {
+      lastErr = err;
+      // problème réseau : inutile d'essayer une autre variante
+      if (/fetch|network/i.test(String((err as Error)?.message ?? err))) break;
+    }
+  }
+  if (!asr) {
+    loadedModel = '';
+    throw lastErr;
   }
   return asr;
 }
@@ -44,8 +56,10 @@ async function load() {
 self.onmessage = async (e: MessageEvent<InMsg>) => {
   if (e.data.type !== 'run') return;
   try {
-    const { audio, language } = e.data;
-    const model = await load();
+    const { audio, model: modelId } = e.data;
+    // les modèles « .en » refusent le paramètre de langue
+    const language = modelId.includes('.en') ? null : e.data.language;
+    const model = await load(modelId);
     const dur = audio.length / SR;
     const words: AsrWord[] = [];
     const windows = Math.max(1, Math.ceil(Math.max(0, dur - (WIN - STEP)) / STEP));
