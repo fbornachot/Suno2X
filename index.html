@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#08080d" />
+    <meta name="description" content="Transforme un MP3 Suno en vidéo MP4 prête pour X : image de fond, vumètres animés, paroles synchronisées. 100 % dans le navigateur." />
+    <title>Suno2X — MP3 vers vidéo X</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2308080d'/%3E%3Cg fill='%237c5cff'%3E%3Crect x='7' y='14' width='3' height='10' rx='1.5'/%3E%3Crect x='12' y='8' width='3' height='16' rx='1.5'/%3E%3Crect x='17' y='11' width='3' height='13' rx='1.5'/%3E%3C/g%3E%3Crect x='22' y='16' width='3' height='8' rx='1.5' fill='%2300e0ff'/%3E%3C/svg%3E" />
+  </head>
+  <body>
+    <div class="page-wrapper">
+      <header class="header_component">
+        <div class="padding-global">
+          <div class="header_inner">
+            <a href="./" class="header_brand" aria-label="Suno2X, accueil">
+              <span class="header_logo" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+              <span class="header_name">Suno<span class="text-color-accent">2X</span></span>
+            </a>
+            <p class="header_tagline text-size-small">MP3 Suno → vidéo MP4 prête pour X · tout reste sur ton appareil</p>
+          </div>
+        </div>
+      </header>
+
+      <main class="main-wrapper">
+        <div class="padding-global">
+          <div class="app_layout">
+            <!-- ===================== Réglages ===================== -->
+            <div class="app_sidebar">
+              <!-- 1. Audio -->
+              <section class="panel_component" aria-labelledby="step-audio">
+                <h2 class="panel_title" id="step-audio"><span class="panel_step">1</span>Morceau</h2>
+                <label class="dropzone_component" data-drop="audio">
+                  <input type="file" accept="audio/*,.mp3,.wav,.m4a" class="dropzone_input" id="audio-input" />
+                  <span class="dropzone_icon" aria-hidden="true">♪</span>
+                  <span class="dropzone_text" id="audio-label">Dépose ton MP3 Suno ou <u>parcours</u></span>
+                  <span class="dropzone_meta text-size-tiny" id="audio-meta"></span>
+                </label>
+                <div class="field_row">
+                  <label class="field_component">
+                    <span class="field_label">Titre</span>
+                    <input type="text" class="field_input" id="title-input" placeholder="Nom du morceau" />
+                  </label>
+                  <label class="field_component">
+                    <span class="field_label">Artiste</span>
+                    <input type="text" class="field_input" id="artist-input" placeholder="Ton nom d'artiste" />
+                  </label>
+                </div>
+              </section>
+
+              <!-- 2. Image -->
+              <section class="panel_component" aria-labelledby="step-image">
+                <h2 class="panel_title" id="step-image"><span class="panel_step">2</span>Image de fond</h2>
+                <label class="dropzone_component is-image" data-drop="image">
+                  <input type="file" accept="image/*" class="dropzone_input" id="image-input" />
+                  <span class="dropzone_thumb" id="image-thumb" aria-hidden="true"></span>
+                  <span class="dropzone_text" id="image-label">Dépose une image ou <u>parcours</u></span>
+                  <span class="dropzone_meta text-size-tiny">JPG, PNG, WebP — idéalement ≥ 1080 px</span>
+                </label>
+                <div class="field_row">
+                  <label class="field_component">
+                    <span class="field_label">Flou <output id="blur-out">0</output></span>
+                    <input type="range" class="field_range" id="blur-input" min="0" max="40" value="0" />
+                  </label>
+                  <label class="field_component">
+                    <span class="field_label">Assombrir <output id="dim-out">15 %</output></span>
+                    <input type="range" class="field_range" id="dim-input" min="0" max="80" value="15" />
+                  </label>
+                </div>
+                <div class="toggle_group">
+                  <label class="toggle_component"><input type="checkbox" id="kenburns-input" checked /><span class="toggle_switch"></span>Zoom lent</label>
+                  <label class="toggle_component"><input type="checkbox" id="pulse-input" checked /><span class="toggle_switch"></span>Pulse sur les basses</label>
+                </div>
+              </section>
+
+              <!-- 3. Paroles -->
+              <section class="panel_component" aria-labelledby="step-lyrics">
+                <h2 class="panel_title" id="step-lyrics"><span class="panel_step">3</span>Paroles</h2>
+                <div class="toggle_group">
+                  <label class="toggle_component"><input type="checkbox" id="instrumental-input" /><span class="toggle_switch"></span>Morceau instrumental (aucune parole)</label>
+                </div>
+                <div class="lyrics_wrapper" id="lyrics-wrapper">
+                  <label class="field_component">
+                    <span class="field_label">Colle les paroles Suno (ou un fichier .lrc)</span>
+                    <textarea class="field_input is-textarea" id="lyrics-input" rows="6" placeholder="[Verse 1]&#10;Première ligne…&#10;Deuxième ligne…&#10;&#10;Les balises [Verse], [Chorus]… sont ignorées."></textarea>
+                  </label>
+                  <p class="text-size-tiny text-color-muted lyrics_source" id="lyrics-source" hidden>✓ Paroles récupérées automatiquement depuis le MP3 Suno</p>
+                  <div class="auto_component" id="auto-component">
+                    <div class="field_row">
+                      <label class="field_component auto_lang">
+                        <span class="field_label">Langue du chant</span>
+                        <select class="field_input" id="lang-select">
+                          <option value="">Auto</option>
+                          <option value="english">Anglais</option>
+                          <option value="french">Français</option>
+                          <option value="spanish">Espagnol</option>
+                          <option value="portuguese">Portugais</option>
+                          <option value="italian">Italien</option>
+                          <option value="german">Allemand</option>
+                        </select>
+                      </label>
+                      <button type="button" class="button is-primary field_button" id="auto-sync-btn" disabled>✦ Caler automatiquement</button>
+                    </div>
+                    <div class="export_progress" id="auto-progress" hidden>
+                      <div class="export_bar"><div class="export_fill" id="auto-fill"></div></div>
+                      <div class="export_meta">
+                        <span class="text-size-small" id="auto-status">Préparation…</span>
+                        <button type="button" class="button is-link" id="auto-cancel">Annuler</button>
+                      </div>
+                    </div>
+                    <p class="text-size-tiny text-color-muted auto_hint" id="auto-hint">IA Whisper exécutée dans ton navigateur (~80 Mo téléchargés une seule fois). Vérifie ensuite les lignes marquées <span class="auto_flag">⚠</span>.</p>
+                  </div>
+                  <div class="button_row">
+                    <button type="button" class="button is-secondary is-small" id="lrc-import-btn">Importer .lrc</button>
+                    <button type="button" class="button is-secondary is-small" id="lrc-export-btn" disabled>Exporter .lrc</button>
+                    <input type="file" accept=".lrc,.txt,text/plain" id="lrc-input" hidden />
+                  </div>
+
+                  <div class="sync_component" id="sync-component" hidden>
+                    <div class="sync_header">
+                      <p class="sync_status text-size-small" id="sync-status">0 / 0 lignes synchronisées</p>
+                      <div class="sync_offset" role="group" aria-label="Décaler toutes les paroles">
+                        <button type="button" class="button is-icon" data-offset="-0.1" title="Tout avancer de 0,1 s">−0,1s</button>
+                        <button type="button" class="button is-icon" data-offset="0.1" title="Tout retarder de 0,1 s">+0,1s</button>
+                      </div>
+                    </div>
+                    <button type="button" class="button is-primary is-wide" id="tap-start-btn">Synchroniser au tap</button>
+                    <div class="tap_component" id="tap-component" hidden>
+                      <p class="tap_hint text-size-small">Tape <kbd>Espace</kbd> (ou le bouton) au <strong>début</strong> de chaque ligne. <kbd>⌫</kbd> annule.</p>
+                      <p class="tap_next" id="tap-next"></p>
+                      <div class="button_row">
+                        <button type="button" class="button is-primary is-tap" id="tap-btn">TAP · ligne suivante</button>
+                        <button type="button" class="button is-secondary" id="tap-undo-btn">Annuler</button>
+                        <button type="button" class="button is-secondary" id="tap-stop-btn">Terminer</button>
+                      </div>
+                    </div>
+                    <ol class="lines_list" id="lines-list"></ol>
+                  </div>
+                </div>
+              </section>
+
+              <!-- 4. Style -->
+              <section class="panel_component" aria-labelledby="step-style">
+                <h2 class="panel_title" id="step-style"><span class="panel_step">4</span>Style</h2>
+                <span class="field_label">Vumètre</span>
+                <div class="segmented_component" role="radiogroup" aria-label="Style de vumètre" id="viz-group">
+                  <button type="button" role="radio" class="segmented_item" data-value="bars" aria-checked="true">Spectre</button>
+                  <button type="button" role="radio" class="segmented_item" data-value="radial" aria-checked="false">Vinyle</button>
+                  <button type="button" role="radio" class="segmented_item" data-value="vu" aria-checked="false">VU stéréo</button>
+                </div>
+                <span class="field_label">Couleurs</span>
+                <div class="palette_component" id="palette-group"></div>
+                <div class="field_row">
+                  <label class="field_component is-color"><span class="field_label">Accent 1</span><input type="color" id="color-a" value="#7c5cff" /></label>
+                  <label class="field_component is-color"><span class="field_label">Accent 2</span><input type="color" id="color-b" value="#00e0ff" /></label>
+                </div>
+                <div class="toggle_group">
+                  <label class="toggle_component"><input type="checkbox" id="title-toggle" checked /><span class="toggle_switch"></span>Titre &amp; artiste</label>
+                  <label class="toggle_component"><input type="checkbox" id="progress-toggle" checked /><span class="toggle_switch"></span>Barre de progression</label>
+                  <label class="toggle_component"><input type="checkbox" id="karaoke-toggle" /><span class="toggle_switch"></span>Remplissage karaoké</label>
+                </div>
+              </section>
+
+              <!-- 5. Format & export -->
+              <section class="panel_component" aria-labelledby="step-export">
+                <h2 class="panel_title" id="step-export"><span class="panel_step">5</span>Format X &amp; export</h2>
+                <div class="format_component" role="radiogroup" aria-label="Format vidéo" id="format-group"></div>
+                <div class="field_row">
+                  <label class="field_component">
+                    <span class="field_label">Début</span>
+                    <input type="text" inputmode="decimal" class="field_input" id="clip-start" value="0:00" />
+                  </label>
+                  <label class="field_component">
+                    <span class="field_label">Fin</span>
+                    <input type="text" inputmode="decimal" class="field_input" id="clip-end" value="0:00" />
+                  </label>
+                  <button type="button" class="button is-secondary is-small field_button" id="clip-here-btn" title="Placer le début à la position de lecture">Début = ici</button>
+                </div>
+                <div class="toggle_group">
+                  <label class="toggle_component"><input type="checkbox" id="premium-input" /><span class="toggle_switch"></span>Compte X Premium (vidéo &gt; 2:20)</label>
+                </div>
+                <p class="notice_component text-size-small" id="clip-notice" hidden></p>
+              </section>
+            </div>
+
+            <!-- ===================== Aperçu ===================== -->
+            <div class="app_preview">
+              <div class="preview_sticky">
+                <div class="preview_stage" id="preview-stage">
+                  <canvas class="preview_canvas" id="preview-canvas" aria-label="Aperçu de la vidéo"></canvas>
+                  <div class="preview_empty" id="preview-empty">
+                    <p>Charge un MP3 pour démarrer</p>
+                  </div>
+                </div>
+
+                <div class="transport_component">
+                  <button type="button" class="button is-round" id="play-btn" aria-label="Lecture" disabled>
+                    <svg viewBox="0 0 24 24" class="icon-play" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l11-6.5a1 1 0 0 0 0-1.72l-11-6.5A1 1 0 0 0 8 5.5Z" fill="currentColor"/></svg>
+                    <svg viewBox="0 0 24 24" class="icon-pause" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1.5" fill="currentColor"/><rect x="14" y="5" width="4" height="14" rx="1.5" fill="currentColor"/></svg>
+                  </button>
+                  <div class="transport_track">
+                    <input type="range" class="transport_seek" id="seek-input" min="0" max="1000" value="0" step="1" aria-label="Position" disabled />
+                    <div class="transport_clip" id="clip-band" aria-hidden="true"></div>
+                  </div>
+                  <span class="transport_time text-size-small" id="time-out">0:00 / 0:00</span>
+                </div>
+
+                <div class="export_component">
+                  <button type="button" class="button is-primary is-large is-wide" id="export-btn" disabled>Générer le MP4 pour X</button>
+                  <div class="export_progress" id="export-progress" hidden>
+                    <div class="export_bar"><div class="export_fill" id="export-fill"></div></div>
+                    <div class="export_meta">
+                      <span class="text-size-small" id="export-status">Préparation…</span>
+                      <button type="button" class="button is-link" id="export-cancel">Annuler</button>
+                    </div>
+                  </div>
+                  <div class="export_result" id="export-result" hidden>
+                    <video class="export_video" id="export-video" controls playsinline></video>
+                    <div class="button_row">
+                      <a class="button is-primary" id="download-link" download>Télécharger le MP4</a>
+                      <button type="button" class="button is-secondary" id="share-btn" hidden>Partager…</button>
+                    </div>
+                    <p class="text-size-tiny text-color-muted" id="export-info"></p>
+                  </div>
+                  <p class="text-size-tiny text-color-muted export_footnote">Encodage H.264 + AAC directement dans ton navigateur. Aucun fichier n'est envoyé sur un serveur.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+    <audio id="audio" preload="auto" hidden></audio>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
